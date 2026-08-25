@@ -52,6 +52,11 @@ inline InputSnapshot snapshotFrom(const InputManager& input, const ButtonBinding
       snapshot.touchX = static_cast<int16_t>(point.x);
       snapshot.touchY = static_cast<int16_t>(point.y);
       snapshot.touchHeld = singleContactHeld && !snapshot.touchReleased;
+      // On the press-edge frame the latest sample is the landing point, so it
+      // needs no separate accessor to stay in this variant's panel space.
+      snapshot.touchDown = snapshot.touchPressed;
+      snapshot.touchDownX = snapshot.touchX;
+      snapshot.touchDownY = snapshot.touchY;
     }
   }
   return snapshot;
@@ -68,6 +73,7 @@ inline InputSnapshot snapshotFrom(const InputManager& input, const DeviceContext
   snapshot.touchPressed = false;
   snapshot.touchReleased = false;
   snapshot.touchHeld = false;
+  snapshot.touchDown = false;
   float nx = 0.0f;
   float ny = 0.0f;
   // Live contact position for InputDrag interactions (sliders): mapped like
@@ -86,6 +92,11 @@ inline InputSnapshot snapshotFrom(const InputManager& input, const DeviceContext
     snapshot.touchPressed = true;
     snapshot.touchX = p.x;
     snapshot.touchY = p.y;
+    // Same edge, kept in its own fields: consumers whose press edge waits on
+    // the tap classifier report only this one, and routing binds drags on it.
+    snapshot.touchDown = true;
+    snapshot.touchDownX = p.x;
+    snapshot.touchDownY = p.y;
   }
   if (input.hasTouch() && input.wasTouchTap(nx, ny)) {
     const Point p = touchToLogical(device, nx, ny, touchFlipX, touchFlipY);
@@ -124,6 +135,7 @@ inline InputSnapshot snapshotFrom(InputManager& input, const DeviceContext& devi
     InputSnapshot snapshot = snapshotFrom(input, bindings);  // keep this frame's button edges
     const Point p = touchToLogical(device, nx, ny, touchFlipX, touchFlipY);
     snapshot.touchPressed = false;
+    snapshot.touchDown = false;
     snapshot.touchHeld = false;
     snapshot.touchReleased = true;
     snapshot.longPress = true;

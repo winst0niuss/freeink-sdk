@@ -976,6 +976,13 @@ struct InputSnapshot {
   // Finger currently down (touchX/Y = its position). Only InputDrag-masked
   // interactions react; everything else ignores held frames.
   bool touchHeld = false;
+  // Raw contact-begin edge, at the point the finger landed (touchDownX/Y).
+  // No tap classifier gates it, unlike touchPressed, so a drag that starts
+  // moving immediately still reports it; routing binds InputDrag elements
+  // here. Adapters that leave it false keep press-edge-only binding.
+  bool touchDown = false;
+  int16_t touchDownX = 0;
+  int16_t touchDownY = 0;
   bool longPress = false;
   bool swipeLeft = false;
   bool swipeRight = false;
@@ -1160,8 +1167,6 @@ private:
   // they don't have the torn-read hazard count_/interactions_ have.
   int16_t focused_ = -1;
   int16_t active_ = -1;
-  // Mirrors the last routed frame's contact, so its opening frame is visible.
-  bool contactHeld_ = false;
   ActionId flashAction_ = NO_ACTION; // tap-flash target (see setFlash)
   int16_t flashValue_ = 0;
 
@@ -1189,24 +1194,12 @@ private:
       if (hasState(interaction.state, StateDisabled))
         continue;
       const bool acceptsKind = acceptsInput(interaction.inputMask, kind);
+      // InputTouch is the catch-all for tap-style kinds; long-press and drag
+      // are opt-in, so a plain button never absorbs them.
       const bool acceptsTouchFallback =
-          kind != InputLongPress &&
+          kind != InputLongPress && kind != InputDrag &&
           acceptsInput(interaction.inputMask, InputTouch);
       if (!acceptsKind && !acceptsTouchFallback)
-        continue;
-      if (interaction.rect.contains(x, y))
-        return i;
-    }
-    return -1;
-  }
-
-  int16_t findDrag(uint8_t slot, int16_t x, int16_t y) const {
-    const Interaction *interactions = interactions_[slot];
-    for (int16_t i = static_cast<int16_t>(count_[slot]) - 1; i >= 0; --i) {
-      const Interaction &interaction = interactions[i];
-      if (hasState(interaction.state, StateDisabled))
-        continue;
-      if (!acceptsInput(interaction.inputMask, InputDrag))
         continue;
       if (interaction.rect.contains(x, y))
         return i;
@@ -1260,18 +1253,19 @@ private:
     ActionEvent event{};
     const size_t slotCount = count_[slot];
 
-    if (input.touchPressed) {
-      active_ = findTouch(slot, input.touchX, input.touchY, InputTouch);
+    // A fast drag never reads as a tap, so consumers can't report it through
+    // touchPressed. Bind it on the contact-begin edge instead, hit-testing
+    // the landing point — the live position would let a contact that merely
+    // passes over a slider grab it. Drag-masked elements only, so taps keep
+    // press-then-release; a contact starting elsewhere clears the binding.
+    if (input.touchDown) {
+      active_ = findTouch(slot, input.touchDownX, input.touchDownY, InputDrag);
     }
 
-    // touchPressed is gated on the contact first reading as a tap, which a
-    // fast drag never is. Bind on the frame the contact begins, at the point
-    // it landed — the live position would let a passing contact grab a
-    // slider. Drag-masked elements only, so taps keep press-then-release.
-    const bool contactBegan = input.touchHeld && !contactHeld_;
-    contactHeld_ = input.touchHeld;
-    if (contactBegan && active_ < 0) {
-      active_ = findDrag(slot, input.touchX, input.touchY);
+    // Runs second: when an adapter reports both edges on one frame, the
+    // classified press wins and drives the pressed-element highlight.
+    if (input.touchPressed) {
+      active_ = findTouch(slot, input.touchX, input.touchY, InputTouch);
     }
 
     // Grab semantics: a drag stays bound to the element the finger landed on
